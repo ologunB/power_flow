@@ -1,0 +1,24 @@
+! OPENDSS CIRCUIT DEFINITION
+
+clear
+New Circuit.Ckt1
+~ basekv=13.2 pu=1.0 MVAsc3=100000 MVAsc1=100000 bus1=Bus1
+
+! Slack Bus Definition
+New Vsource.Slack Bus1=Bus1 BasekV=13.2 pu=1.0 Phase=3
+
+! Define Lines
+New Line.Line1 Bus1=Bus1 Bus2=load1 R1=0.01 X1=0.1 R0=0.01 X0=0.1 Length=1 Units=kft
+New Line.Line2 Bus1=Bus1 Bus2=bus2 R1=0.02 X1=0.15 R0=0.02 X0=0.15 Length=1 Units=kft
+
+! Define Loads
+New Load.Load1 Bus1=load1 Phases=3 kV=13.2 kW=1000 pf=0.95
+New Load.Load2 Bus1=bus2 Phases=3 kV=13.2 kW=2000 pf=0.90
+
+! Define Generator
+New Generator.G1 Bus1=Bus2 kV=13.2 kW=1500 pf=1 Model=1
+
+! Set Voltage Bases and Solve
+Set VoltageBases=[13.2]
+CalcVoltageBases
+Solve
