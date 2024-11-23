@@ -145,6 +145,9 @@ Solve
 4. **GUI Issues**:
    - If the GUI does not start, ensure PyQt5 is installed and properly configured.
 
+5. **Some DSS Files are outdated**:
+   - In this case, it tells you it cant process the circuit because of some elements in it, please contact developer(Me) or open issue and add the .dss file so it can be improved on.
+
 ---
 
 ## Future Enhancements
@@ -155,6 +158,6 @@ Solve
 ---
 
 ## Contributors
-- **Your Name**: Developed the core logic and GUI.
+- **Temitope**: Developed the core logic and GUI.
 
-For any questions or issues, feel free to contact **Your Email**.
+For any questions or issues, feel free to contact **logunbabatope@gmail.com**.
