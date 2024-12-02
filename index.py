@@ -12,7 +12,7 @@ class PowerFlowAnalysis:
         """Extract system data using dss-python."""
         dss_engine = dss.DSS
         dss_engine.ClearAll()
-        
+
         try:
             dss_engine.Text.Command = f"Compile [{self.dss_file_path}]"
             print(f"DSS file '{self.dss_file_path}' compiled successfully!")
@@ -25,56 +25,64 @@ class PowerFlowAnalysis:
             print("Error: Unable to access the circuit from the DSS file.")
             return None
 
-        self.system_data = {
-            "buses": [],
-            "lines": [],
-            "loads": [],
-            "generators": [],
-            "voltages": {}
-        }
-
-        # Extract buses
-        self.system_data["buses"] = circuit.AllBusNames
-
-        # Extract lines
-        for element_name in circuit.Lines.AllNames:
-            circuit.Lines.Name = element_name
-            self.system_data["lines"].append({
-                "name": element_name,
-                "from": circuit.Lines.Bus1,
-                "to": circuit.Lines.Bus2,
-                "impedance": complex(circuit.Lines.R1, circuit.Lines.X1)
-            })
-
-        # Extract loads
-        for element_name in circuit.Loads.AllNames:
-            circuit.Loads.Name = element_name
-            bus_names = circuit.Loads.AllNames
-            if bus_names:
-                bus = bus_names[0]  # Primary bus for the load
-            else:
-                bus = "Unknown"
-
-            self.system_data["loads"].append({
-                "bus": bus,
-                "p": circuit.Loads.kW,
-                "q": circuit.Loads.kvar
-            })
+        self.system_data = {"buses": [bus.split('.')[0] for bus in circuit.AllBusNames], "lines": [], "loads": [],
+                            "generators": [], "voltages": {}, "slack_bus": None}
 
         # Extract generators
         for element_name in circuit.Generators.AllNames:
-            circuit.Generators.Name = element_name
-            generator_data = {
-                "bus": circuit.Generators.Bus1.split('.')[0],  # Remove phase information
-                "p": circuit.Generators.kW,
-                "q": circuit.Generators.kvar
-            }
-            self.system_data["generators"].append(generator_data)
+            if element_name and element_name != 'NONE':
+                circuit.Generators.Name = element_name
+                self.system_data["generators"].append({
+                    "bus": circuit.Generators.Bus1.split('.')[0],  # Remove phase information
+                    "p": circuit.Generators.kW,
+                    "q": circuit.Generators.kvar
+                })
+
+        # Extract lines
+        for element_name in circuit.Lines.AllNames:
+            if element_name and element_name != 'NONE':
+                circuit.Lines.Name = element_name
+                self.system_data["lines"].append({
+                    "name": element_name,
+                    "from": circuit.Lines.Bus1.split('.')[0],  # Remove phase information
+                    "to": circuit.Lines.Bus2.split('.')[0],  # Remove phase information
+                    "impedance": complex(circuit.Lines.R1, circuit.Lines.X1)
+                })
+
+        # Extract loads
+        for element_name in circuit.Loads.AllNames:
+            if element_name and element_name != 'NONE':
+                circuit.Loads.Name = element_name
+                bus_names = circuit.Loads.AllNames
+                if bus_names:
+                    bus = bus_names[0].split('.')[0]  # Remove phase information
+                else:
+                    bus = "Unknown"
+
+                self.system_data["loads"].append({
+                    "bus": bus,
+                    "p": circuit.Loads.kW,
+                    "q": circuit.Loads.kvar
+                })
 
         # Extract bus voltages
         for bus in circuit.AllBusNames:
             bus_voltage = circuit.Buses(bus).VMagAngle  # Voltage magnitude and angle
             self.system_data["voltages"][bus] = bus_voltage
+
+        # Identify slack bus
+        for element_name in circuit.Vsources.AllNames:
+            if element_name and element_name != 'NONE':
+                circuit.Vsources.Name = element_name
+
+                # Check if the 'pu' is set to 1.0, it's typically the slack bus.
+                if hasattr(circuit.Vsources, "pu") and circuit.Vsources.pu == 1.0 and circuit.Vsources.Name == 'slack':
+                    slack_bus = circuit.Buses.Name
+                    self.system_data["slack_bus"] = slack_bus.split('.')[0]
+                    break  # We assume only one slack bus in typical setups
+
+        # Output the extracted system data for debugging
+        print(self.system_data)
 
     def compute_power_flow_with_dss(self):
         """Compute power flow using dss-python."""
@@ -98,8 +106,8 @@ class PowerFlowAnalysis:
         lines = self.system_data['lines']
         loads = self.system_data['loads']
         generators = self.system_data['generators']
-
         slack_bus = self.system_data.get("slack_bus", None)
+
         num_buses = len(buses)
         Y_bus = np.zeros((num_buses, num_buses), dtype=complex)
 
@@ -119,20 +127,28 @@ class PowerFlowAnalysis:
         V = np.ones(num_buses, dtype=complex)
         for i, bus in enumerate(buses):
             voltage_data = self.system_data["voltages"].get(bus, [1.0, 0.0])
-            magnitude, angle = voltage_data[:2]
+            magnitude, angle = voltage_data[0], voltage_data[1]
             V[i] = magnitude * np.exp(1j * np.radians(angle))
 
         # Initialize powers
         P = np.zeros(num_buses)
         Q = np.zeros(num_buses)
         for load in loads:
-            bus_idx = buses.index(load['bus'])
-            P[bus_idx] -= load['p'] / 1000.0
-            Q[bus_idx] -= load['q'] / 1000.0
+            try:
+                bus_idx = buses.index(load['bus'])
+                P[bus_idx] -= load['p'] / 1000.0
+                Q[bus_idx] -= load['q'] / 1000.0
+            except ValueError:
+                print(f"Warning: Load bus '{load['bus']}' not found in buses list.")
+                continue
         for generator in generators:
-            bus_idx = buses.index(generator['bus'])
-            P[bus_idx] += generator['p'] / 1000.0
-            Q[bus_idx] += generator['q'] / 1000.0
+            try:
+                bus_idx = buses.index(generator['bus'])
+                P[bus_idx] += generator['p'] / 1000.0
+                Q[bus_idx] += generator['q'] / 1000.0
+            except ValueError:
+                print(f"Warning: Gen '{generator}' not found in buses list.")
+                continue
 
         # Gauss-Seidel
         max_iterations = 100
@@ -140,7 +156,7 @@ class PowerFlowAnalysis:
         for _ in range(max_iterations):
             V_prev = V.copy()
             for i in range(num_buses):
-                if slack_bus and i == buses.index(slack_bus["bus"]):
+                if slack_bus:# and buses[i] == slack_bus:
                     continue
                 sum_YV = sum(Y_bus[i, j] * V[j] for j in range(num_buses) if j != i)
                 V[i] = ((P[i] - 1j * Q[i]) / np.conj(V[i]) - sum_YV) / Y_bus[i, i]
@@ -155,16 +171,14 @@ class PowerFlowAnalysis:
     @staticmethod
     def compare_power_flows(manual_results, dss_results):
         """Compare manual and DSS power flow results and return as a string."""
-        output = []
-        output.append("\n--- Comparison of Power Flow Results ---")
-        output.append(f"{'Bus':<10} {'Manual Voltage (pu)':<25} {'DSS Voltage (pu)':<25} {'Difference':<15}")
+        output = ["\n--- Comparison of Power Flow Results ---",
+                  f"{'Bus':<10} {'Manual Voltage (pu)':<25} {'DSS Voltage (pu)':<25} {'Difference':<15}"]
         for bus in manual_results:
             manual_v = abs(manual_results[bus][0])
             dss_v = abs(dss_results.get(bus, [0])[0])
             diff = abs(manual_v - dss_v)
-            output.append(f"{bus:<10} {manual_v:<25.4f} {dss_v:<25.4f} {diff:<15.4f}")
+            output.append(f"{bus:<10} {manual_v:<25.7f} {dss_v:<25.7f} {diff:<15.7f}")
         return "\n".join(output)
-
 
 if __name__ == "__main__":
     dss_file_path = "circuit.dss"

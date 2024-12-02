@@ -12,6 +12,15 @@ class OpenDSSApp(QMainWindow):
     def __init__(self):
         super().__init__()
 
+        self.selected_file = None
+        self.clear_button = None
+        self.solve_button = None
+        self.default_button = None
+        self.browse_button = None
+        self.drag_label = None
+        self.central_widget = None
+        self.layout = None
+        self.button_layout = None
         self.setWindowTitle("OpenDSS Drag-and-Drop Solver")
         self.setGeometry(200, 200, 800, 600)
 
